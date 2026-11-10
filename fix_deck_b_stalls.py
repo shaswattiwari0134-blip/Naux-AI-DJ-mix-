@@ -1,0 +1,1427 @@
+import json
+import shutil
+
+# 1. Update Jalebi Bai in naux_full_library.json with fallback ID
+with open("naux_full_library.json", "r", encoding="utf-8") as f:
+    library = json.load(f)
+
+for s in library:
+    if s.get("song_id") == "jalebi-bai-ritu-pathak":
+        s["youtube_ids"] = ["jURo-_lj9yk", "rpw4l39z_9A"]
+        print("Updated Jalebi Bai with fallback YouTube ID rpw4l39z_9A!")
+
+with open("naux_full_library.json", "w", encoding="utf-8") as f:
+    json.dump(library, f, indent=2)
+
+# Minify for embedding
+min_lib = []
+for s in library:
+    min_lib.append({
+        "song_id": s.get("song_id"),
+        "title": s.get("title", ""),
+        "artist": s.get("artist", ""),
+        "youtube_ids": s.get("youtube_ids", []),
+        "entry_sec": s.get("entry_sec", 0),
+        "exit_sec": s.get("exit_sec", s.get("duration_sec", 180)),
+        "duration_sec": s.get("duration_sec", 180),
+        "energy": s.get("energy", 7),
+        "language": s.get("language", "hindi"),
+        "subtype": s.get("subtype", "party"),
+        "banger": s.get("banger", False)
+    })
+
+library_json = json.dumps(min_lib)
+
+html_content = f'''<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NAUX · Universal Party DJ (Resilient Auto-Mix & Queue)</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;600;700;900&display=swap" rel="stylesheet">
+  <style>
+    body {{
+      background-color: #080808;
+      color: #f5f5f5;
+      font-family: 'Inter', sans-serif;
+    }}
+    .font-anton {{
+      font-family: 'Anton', sans-serif;
+      letter-spacing: 0.05em;
+    }}
+    .text-lime {{ color: #d4ff00; }}
+    .bg-lime {{ background-color: #d4ff00; }}
+    .border-lime {{ border-color: #d4ff00; }}
+    .pulse-glow {{
+      box-shadow: 0 0 35px rgba(212, 255, 0, 0.45);
+    }}
+    #naux-players-host {{
+      position: fixed;
+      left: 0;
+      bottom: 0;
+      width: 320px;
+      height: 180px;
+      opacity: 0.01;
+      pointer-events: none;
+      z-index: -1;
+      overflow: hidden;
+    }}
+    .eq-bar {{
+      animation: eqBounce 0.8s ease-in-out infinite alternate;
+    }}
+    @keyframes eqBounce {{
+      0% {{ height: 20%; }}
+      100% {{ height: 100%; }}
+    }}
+    .queue-item.dragging {{
+      opacity: 0.4;
+      border: 2px dashed #d4ff00;
+    }}
+    .queue-item.drag-over {{
+      border-top: 2px solid #d4ff00;
+      background: rgba(212, 255, 0, 0.08);
+    }}
+  </style>
+</head>
+<body class="min-h-screen flex flex-col justify-between selection:bg-lime selection:text-black">
+
+  <!-- PERSISTENT YOUTUBE IFRAME HOST -->
+  <div id="naux-players-host">
+    <div id="deck-A-player"></div>
+    <div id="deck-B-player"></div>
+  </div>
+
+  <!-- Top Bar -->
+  <header class="border-b border-white/10 px-4 sm:px-6 py-4 flex items-center justify-between">
+    <div class="flex items-center gap-3">
+      <h1 class="text-3xl font-anton text-lime tracking-wider">NAUX</h1>
+      <span class="text-xs uppercase tracking-widest text-white/40 border border-white/20 px-2 py-0.5 rounded">The aux, handled</span>
+    </div>
+    <div class="flex items-center gap-3 text-xs">
+      <a href="room.html" target="_blank" class="hidden sm:inline-flex items-center gap-1.5 border border-lime/30 bg-lime/10 text-lime px-3 py-1 rounded-full font-bold hover:bg-lime hover:text-black transition">
+        📱 Guest Request Room ↗
+      </a>
+      <div id="ytStatusBadge" class="flex items-center gap-1.5 text-lime font-mono">
+        <span class="w-2 h-2 rounded-full bg-lime animate-pulse"></span> Connecting YouTube...
+      </div>
+    </div>
+  </header>
+
+  <div id="fileNotice" class="hidden bg-amber-500/10 border-b border-amber-500/30 text-amber-300 px-6 py-2.5 text-xs flex items-center justify-between">
+    <div class="flex items-center gap-2">
+      <span>💡 Running on <code class="bg-black/50 px-1 py-0.5 rounded text-white font-mono">file://</code>. Run <code class="bg-black/50 px-1 py-0.5 rounded text-white font-mono">run_naux.bat</code> to open via <strong class="text-white">http://localhost:3000</strong>!</span>
+    </div>
+    <button onclick="document.getElementById('fileNotice').remove()" class="text-white/60 hover:text-white font-bold ml-4">✕</button>
+  </div>
+
+  <main class="max-w-4xl w-full mx-auto p-4 sm:p-6 flex-1 flex flex-col justify-center">
+
+    <!-- SETUP VIEW -->
+    <div id="setupView" class="space-y-8">
+      <div class="text-center space-y-3">
+        <h1 class="text-6xl sm:text-8xl font-anton text-white tracking-tight uppercase">
+          The Aux, <span class="text-lime">Handled.</span>
+        </h1>
+        <p class="text-white/60 text-sm sm:text-base max-w-lg mx-auto">
+          Party songs across all languages that drop straight into the hook, cut before the outro, and mix seamlessly.
+        </p>
+      </div>
+
+      <div class="bg-white/5 border border-white/10 rounded-3xl p-6 sm:p-8 space-y-6">
+        <div>
+          <div class="flex justify-between items-center mb-3">
+            <label class="text-xs uppercase tracking-wider text-white/50 font-semibold">1. Select Languages ({len(min_lib)} Tracks Available)</label>
+            <span class="text-xs text-lime">Multi-select enabled</span>
+          </div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <button data-lang="punjabi" class="lang-btn border border-lime bg-lime/10 text-lime py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">👳 Punjabi</button>
+            <button data-lang="hindi" class="lang-btn border border-lime bg-lime/10 text-lime py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🇮🇳 Hindi / Bollywood</button>
+            <button data-lang="english" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🌍 English / Pop</button>
+            <button data-lang="tamil-telugu" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🌴 South (Tamil/Telugu)</button>
+            <button data-lang="haryanvi-bhojpuri" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🪕 Desi / Haryanvi</button>
+            <button data-lang="gujarati" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🪘 Garba / Gujarati</button>
+            <button data-lang="latin" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">💃 Latin / Reggaeton</button>
+            <button data-lang="all" class="lang-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-xs sm:text-sm transition">🌐 All Combined</button>
+          </div>
+        </div>
+
+        <div>
+          <label class="block text-xs uppercase tracking-wider text-white/50 mb-3 font-semibold">2. Party Energy / Time of Night</label>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+            <button data-time="warmup" class="time-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-sm transition">Warmup</button>
+            <button data-time="peak" class="time-btn border border-lime bg-lime/10 text-lime py-3 px-4 rounded-2xl font-bold text-sm transition">Peak (Party)</button>
+            <button data-time="bangers" class="time-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-sm transition">Bangers Only 🔥</button>
+            <button data-time="winddown" class="time-btn border border-white/10 text-white/70 hover:border-white/30 py-3 px-4 rounded-2xl font-bold text-sm transition">Wind-down</button>
+          </div>
+        </div>
+
+        <button id="startPartyBtn" class="w-full bg-lime text-black font-anton text-2xl sm:text-3xl py-5 rounded-2xl hover:brightness-110 active:scale-[0.99] transition shadow-lg pulse-glow uppercase tracking-wider cursor-pointer">
+          APPROVE & PLAY (DROP THE HOOK) 🔥
+        </button>
+      </div>
+
+      <div class="flex justify-between items-center text-xs text-white/30 uppercase tracking-widest px-2">
+        <span>Curated Library: <strong class="text-lime">{len(min_lib)} Songs</strong></span>
+        <a href="naux_cue_studio.html" class="text-lime hover:underline font-bold">Open Cue Studio →</a>
+      </div>
+    </div>
+
+    <!-- PLAYER VIEW -->
+    <div id="playerView" class="hidden space-y-6">
+
+      <div id="unmutePrompt" class="hidden bg-lime text-black p-4 rounded-2xl flex items-center justify-between font-bold shadow-2xl">
+        <div class="flex items-center gap-2">
+          <span>🔊 Browser requires a tap to start party audio:</span>
+        </div>
+        <button id="unmuteBtn" class="bg-black text-lime px-5 py-2.5 rounded-xl text-xs uppercase tracking-wider font-anton hover:bg-neutral-900 active:scale-95 transition">
+          Tap To Play Audio
+        </button>
+      </div>
+
+      <!-- Live Track Card -->
+      <div class="bg-white/5 border border-white/10 rounded-3xl p-6 sm:p-8 relative overflow-hidden">
+        
+        <div class="flex items-center justify-between mb-4">
+          <div class="flex items-center gap-2">
+            <span class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold bg-lime/20 text-lime border border-lime/30">
+              <span class="w-2 h-2 rounded-full bg-lime animate-ping"></span> LIVE ON AUX
+            </span>
+            <span id="activeDeckPill" class="text-xs uppercase text-white/40 tracking-wider font-mono">Deck A</span>
+          </div>
+          <div id="crossfadeIndicator" class="hidden text-xs font-bold text-lime uppercase tracking-wider animate-pulse">
+            ⚡ Mixing Into Next Hook (1.5s Equal-Power)
+          </div>
+        </div>
+
+        <div class="space-y-1 mb-6">
+          <h2 id="nowPlayingTitle" class="text-4xl sm:text-6xl font-anton text-white tracking-wide uppercase truncate">
+            Loading...
+          </h2>
+          <p id="nowPlayingArtist" class="text-white/60 text-lg sm:text-xl font-medium truncate">
+            -
+          </p>
+        </div>
+
+        <div class="space-y-2">
+          <div class="flex justify-between text-xs text-white/40 font-mono">
+            <span id="currentTimeLabel">0:00</span>
+            <span id="cutPointLabel" class="text-lime">Hook Cut @ 1:27</span>
+          </div>
+          <div class="relative w-full h-3 bg-white/10 rounded-full overflow-hidden">
+            <div id="progressBar" class="h-full bg-lime transition-all duration-100" style="width: 0%"></div>
+          </div>
+        </div>
+
+        <!-- Controls -->
+        <div class="mt-8 flex flex-wrap items-center justify-between gap-4">
+          <div class="flex items-center gap-3">
+            <button id="togglePlayBtn" class="bg-white text-black font-anton px-8 py-3 rounded-2xl hover:bg-white/90 active:scale-95 transition text-lg uppercase">
+              Pause
+            </button>
+            <button id="skipBtn" class="bg-white/10 border border-white/20 hover:border-lime hover:text-lime px-6 py-3 rounded-2xl font-bold text-sm transition">
+              Skip Track ⏭
+            </button>
+          </div>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <!-- Fade duration selector -->
+            <div class="flex items-center gap-1.5 bg-black/40 border border-white/10 px-3 py-1.5 rounded-xl text-xs">
+              <span class="text-white/40 uppercase text-[10px] font-bold">Fade:</span>
+              <select id="fadeDurationSelect" class="bg-transparent text-lime font-mono font-bold focus:outline-none cursor-pointer">
+                <option value="500" class="bg-neutral-900 text-white">0.5s (Quick Drop)</option>
+                <option value="1500" selected class="bg-neutral-900 text-white">1.5s (Standard Mix)</option>
+                <option value="3000" class="bg-neutral-900 text-white">3.0s (Long Blend)</option>
+              </select>
+            </div>
+
+            <!-- Master Volume -->
+            <div class="flex items-center gap-2 bg-black/40 border border-white/10 px-3 py-1.5 rounded-xl text-xs">
+              <span class="text-white/40">🔊</span>
+              <input id="masterVolumeSlider" type="range" min="0" max="100" value="100" class="w-16 sm:w-20 cursor-pointer" title="Master Speaker Volume">
+              <span id="masterVolLabel" class="font-mono text-lime text-[11px] w-7 text-right">100%</span>
+            </div>
+
+            <button id="playFullBtn" class="border border-white/20 hover:border-white/50 text-white/70 px-4 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition">
+              Ride Full Song (Don't Cut)
+            </button>
+          </div>
+        </div>
+
+        <!-- Keyboard Shortcuts Hint Badge -->
+        <div class="mt-4 pt-3 border-t border-white/5 flex flex-wrap items-center gap-2 text-[11px] text-white/40 font-mono">
+          <span class="text-white/60 font-semibold uppercase text-[10px] tracking-wider">Keyboard:</span>
+          <span class="bg-white/10 px-2 py-0.5 rounded border border-white/10 text-white/80 font-bold">Space</span> <span class="text-white/60">Play / Pause</span>
+          <span class="bg-white/10 px-2 py-0.5 rounded border border-white/10 text-white/80 font-bold ml-2">→</span> <span class="text-white/60">Skip Hook</span>
+          <span class="bg-white/10 px-2 py-0.5 rounded border border-white/10 text-white/80 font-bold ml-2">S</span> <span class="text-white/60">Shuffle</span>
+          <span class="bg-white/10 px-2 py-0.5 rounded border border-white/10 text-white/80 font-bold ml-2">F</span> <span class="text-white/60">Ride Full</span>
+        </div>
+      </div>
+
+      <!-- UNIVERSAL SEARCH & QUEUE -->
+      <div class="bg-white/5 border border-white/10 rounded-3xl p-5 space-y-3">
+        <div class="flex justify-between items-center">
+          <h3 class="font-anton text-lg uppercase tracking-wide text-white/90">Find Any Artist / Add Any YouTube Track</h3>
+          <span class="text-[10px] text-white/40 uppercase tracking-widest">{len(min_lib)}+ Songs Ready</span>
+        </div>
+        
+        <div class="flex gap-2">
+          <input id="quickSearchInput" type="text" placeholder="Search artist (Arijit, Drake, Diljit, Weeknd...) or paste YouTube URL" 
+                 class="flex-1 bg-black/60 border border-white/20 rounded-2xl px-4 py-3 text-sm focus:outline-none focus:border-lime text-white">
+          <button id="addCustomYtBtn" class="bg-lime text-black font-anton px-5 py-3 rounded-2xl text-sm uppercase hover:brightness-110 transition whitespace-nowrap">
+            + Queue Track
+          </button>
+        </div>
+
+        <div id="searchResultsDropdown" class="hidden bg-neutral-900 border border-white/20 rounded-2xl p-2 max-h-60 overflow-y-auto divide-y divide-white/5 space-y-1">
+        </div>
+      </div>
+
+      <!-- DUAL-DECK DJ MONITORS -->
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        
+        <!-- DECK A -->
+        <div id="deckAMonitor" class="p-5 rounded-3xl border-2 border-lime bg-white/[0.04] space-y-3 transition">
+          <div class="flex justify-between items-center text-xs font-mono">
+            <span class="text-white/60 font-bold">DECK A (YOUTUBE)</span>
+            <span id="deckAStatus" class="text-lime font-bold">LIVE (100% VOL)</span>
+          </div>
+
+          <div class="flex items-center gap-4 bg-black/40 p-4 rounded-2xl border border-white/5">
+            <div id="deckAEq" class="flex items-end gap-1 h-8 w-8">
+              <span class="w-1.5 bg-lime rounded-full eq-bar" style="animation-delay: 0.1s;"></span>
+              <span class="w-1.5 bg-lime rounded-full eq-bar" style="animation-delay: 0.3s;"></span>
+              <span class="w-1.5 bg-lime rounded-full eq-bar" style="animation-delay: 0.2s;"></span>
+              <span class="w-1.5 bg-lime rounded-full eq-bar" style="animation-delay: 0.4s;"></span>
+            </div>
+            <div class="truncate">
+              <p id="deckASong" class="font-bold text-white text-sm truncate">Loading...</p>
+              <p id="deckAArtist" class="text-xs text-white/50 truncate">Artist</p>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between text-[10px] font-mono text-white/40">
+              <span>Fader Volume</span>
+              <span id="deckAVolLabel">100%</span>
+            </div>
+            <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+              <div id="deckAVolume" class="h-full bg-lime transition-all duration-75" style="width: 100%"></div>
+            </div>
+          </div>
+        </div>
+
+        <!-- DECK B -->
+        <div id="deckBMonitor" class="p-5 rounded-3xl border border-white/10 bg-white/[0.02] space-y-3 transition">
+          <div class="flex justify-between items-center text-xs font-mono">
+            <span class="text-white/60 font-bold">DECK B (YOUTUBE)</span>
+            <span id="deckBStatus" class="text-white/40">PRELOADING...</span>
+          </div>
+
+          <div class="flex items-center gap-4 bg-black/40 p-4 rounded-2xl border border-white/5">
+            <div id="deckBEq" class="flex items-end gap-1 h-8 w-8 opacity-40">
+              <span class="w-1.5 bg-white/50 rounded-full h-2"></span>
+              <span class="w-1.5 bg-white/50 rounded-full h-4"></span>
+              <span class="w-1.5 bg-white/50 rounded-full h-2"></span>
+              <span class="w-1.5 bg-white/50 rounded-full h-3"></span>
+            </div>
+            <div class="truncate">
+              <p id="deckBSong" class="font-bold text-white text-sm truncate">Upcoming Track</p>
+              <p id="deckBArtist" class="text-xs text-white/50 truncate">Ready to mix</p>
+            </div>
+          </div>
+
+          <div class="space-y-1">
+            <div class="flex justify-between text-[10px] font-mono text-white/40">
+              <span>Fader Volume</span>
+              <span id="deckBVolLabel">0%</span>
+            </div>
+            <div class="h-2 w-full bg-white/10 rounded-full overflow-hidden">
+              <div id="deckBVolume" class="h-full bg-lime transition-all duration-75" style="width: 0%"></div>
+            </div>
+          </div>
+        </div>
+
+      </div>
+
+      <!-- UPCOMING QUEUE WITH FULL DRAG & DROP, SHUFFLE, AND REORDERING -->
+      <div class="border border-white/10 rounded-3xl p-6 bg-white/[0.02] space-y-4">
+        <div class="flex flex-wrap justify-between items-center gap-3">
+          <div>
+            <h3 class="font-anton text-2xl uppercase tracking-wide text-white/90">Party Queue</h3>
+            <p class="text-[11px] text-white/40">Drag handles <strong class="text-white/70">⠿</strong> to reorder freely, or tap buttons to play now</p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button id="shuffleQueueBtn" class="bg-lime/10 border border-lime/30 hover:bg-lime hover:text-black text-lime font-anton px-4 py-2 rounded-xl text-xs uppercase tracking-wider transition flex items-center gap-1.5">
+              <span>🔀</span> Shuffle Queue
+            </button>
+            <button id="exportSetlistBtn" class="border border-white/20 hover:border-lime hover:text-lime text-white/70 font-anton px-3 py-2 rounded-xl text-xs uppercase tracking-wider transition" title="Save current queue to JSON">
+              💾 Export Set
+            </button>
+            <button id="retuneBtn" class="border border-white/10 hover:border-white/30 text-white/50 hover:text-white px-3 py-2 rounded-xl text-xs uppercase tracking-wider transition">
+              Retune
+            </button>
+          </div>
+        </div>
+
+        <ol id="queueList" class="space-y-2 text-sm">
+        </ol>
+      </div>
+
+      <!-- Live Event Engine Logs -->
+      <div class="border border-white/10 rounded-2xl p-4 bg-black/40 text-xs font-mono text-white/50 space-y-1">
+        <p class="text-white/30 uppercase text-[10px] font-bold">DJ Engine Log:</p>
+        <div id="engineLog" class="h-20 overflow-y-auto space-y-1 text-white/70">
+          <div>[NAUX] Ready to play {len(min_lib)} tracks. Tap APPROVE & PLAY to drop the hook.</div>
+        </div>
+      </div>
+
+    </div>
+
+  </main>
+
+  <footer class="border-t border-white/10 p-4 text-center text-xs text-white/40 flex justify-between items-center max-w-4xl mx-auto w-full">
+    <span>Reverse Engineered NAUX Dual-Deck Player ({len(min_lib)} Tracks)</span>
+    <a href="naux_cue_studio.html" class="text-lime hover:underline font-bold">Open Cue Studio →</a>
+  </footer>
+
+  <script>
+    if (window.location.protocol === 'file:') {{
+      const notice = document.getElementById('fileNotice');
+      if (notice) notice.classList.remove('hidden');
+    }}
+
+    const LIBRARY = {library_json};
+    let selectedLangs = ['punjabi', 'hindi', 'english'];
+    let selectedTime = 'peak';
+
+    function formatTime(sec) {{
+      sec = Math.max(0, Math.floor(sec || 0));
+      const m = Math.floor(sec / 60);
+      const s = sec % 60;
+      return `${{m}}:${{s < 10 ? '0' : ''}}${{s}}`;
+    }}
+
+    function logToScreen(msg) {{
+      const el = document.getElementById('engineLog');
+      if (!el) return;
+      const d = document.createElement('div');
+      d.textContent = `[${{new Date().toLocaleTimeString()}}] ${{msg}}`;
+      el.appendChild(d);
+      el.scrollTop = el.scrollHeight;
+      console.log("[NAUX]", msg);
+    }}
+
+    function buildSetlist(lib, languages, timeMood) {{
+      const energyTargets = {{
+        warmup: 5.0,
+        peak: 7.5,
+        bangers: 8.8,
+        winddown: 4.0
+      }};
+      const targetEnergy = energyTargets[timeMood] || 7.0;
+
+      let pool = lib;
+      if (!languages.includes('all')) {{
+        pool = lib.filter(s => languages.includes(s.language));
+      }}
+      if (pool.length < 5) pool = lib;
+
+      let scored = pool.map(s => {{
+        let dist = Math.abs(s.energy - targetEnergy);
+        let score = 10 - (dist * 2) + (s.banger ? 3 : 0) + (Math.random() * 2.0);
+        return {{ song: s, score }};
+      }}).sort((a, b) => b.score - a.score);
+
+      let list = scored.map(item => ({{ ...item.song, play_full: false }}));
+
+      for (let i = 1; i < list.length; i++) {{
+        const primary = s => (s.artist || '').split(/,|&|feat/i)[0].trim().toLowerCase();
+        if (primary(list[i]) === primary(list[i - 1])) {{
+          for (let j = i + 1; j < list.length; j++) {{
+            if (primary(list[j]) !== primary(list[i - 1])) {{
+              const temp = list[i];
+              list[i] = list[j];
+              list[j] = temp;
+              break;
+            }}
+          }}
+        }}
+      }}
+      return list.slice(0, 50);
+    }}
+
+    // BULLETPROOF RESILIENT DUAL-DECK ENGINE
+    class NauxDualDeckEngine {{
+      constructor() {{
+        this.decks = {{
+          A: {{ id: 'A', player: null, status: 'empty', role: null, cue: null, volume: 100, idIndex: 0, playFull: false, timer: null }},
+          B: {{ id: 'B', player: null, status: 'empty', role: null, cue: null, volume: 0, idIndex: 0, playFull: false, timer: null }}
+        }};
+        this.liveId = 'A';
+        this.crossfading = false;
+        this.paused = false;
+        this.queue = [];
+        this.ready = false;
+        this.awaitingStart = null;
+        this.pendingHandoff = null;
+        this.tickTimer = null;
+        this.fadeTimer = null;
+        this.masterVolume = 100;
+        this.crossfadeDuration = 1500;
+      }}
+
+      async init() {{
+        logToScreen("Connecting YouTube Players...");
+        await this.loadYT();
+        await Promise.all([
+          this.createPlayer('A', 'deck-A-player'),
+          this.createPlayer('B', 'deck-B-player')
+        ]);
+        this.ready = true;
+        logToScreen("Both Deck A & Deck B ready.");
+
+        this.tickTimer = setInterval(() => this.tick(), 250);
+        document.getElementById('ytStatusBadge').innerHTML = '<span class="w-2 h-2 rounded-full bg-lime"></span> Decks Ready';
+      }}
+
+      loadYT() {{
+        return new Promise((resolve) => {{
+          if (window.YT && window.YT.Player) return resolve(window.YT);
+          window.onYouTubeIframeAPIReady = () => resolve(window.YT);
+          const tag = document.createElement('script');
+          tag.src = "https://www.youtube.com/iframe_api";
+          document.head.appendChild(tag);
+        }});
+      }}
+
+      createPlayer(deckId, domId) {{
+        return new Promise((resolve) => {{
+          const vars = {{
+            autoplay: 0,
+            controls: 0,
+            disablekb: 1,
+            fs: 0,
+            playsinline: 1,
+            rel: 0,
+            enablejsapi: 1
+          }};
+          if (window.location.protocol.startsWith('http')) {{
+            vars.origin = window.location.origin;
+          }}
+
+          this.decks[deckId].player = new YT.Player(domId, {{
+            width: '320',
+            height: '180',
+            playerVars: vars,
+            events: {{
+              onReady: () => {{
+                logToScreen(`Deck ${{deckId}} initialized.`);
+                resolve();
+              }},
+              onStateChange: (e) => this.onStateChange(this.decks[deckId], e.data),
+              onError: (e) => this.onError(this.decks[deckId], e.data)
+            }}
+          }});
+        }});
+      }}
+
+      start(setlist) {{
+        if (!this.ready || setlist.length === 0) return;
+        this.queue = setlist.slice();
+        
+        const first = this.queue.shift();
+        this.liveId = 'A';
+        this.assign(this.decks.A, first);
+        this.load(this.decks.A, 'live');
+
+        this.preloadNextOn(this.decks.B);
+        this.updateUI();
+        renderQueue(this.queue);
+      }}
+
+      assign(deck, cue) {{
+        deck.cue = cue;
+        deck.idIndex = 0;
+        deck.playFull = false;
+      }}
+
+      clearTimer(deck) {{
+        if (deck.timer) {{
+          clearTimeout(deck.timer);
+          deck.timer = null;
+        }}
+      }}
+
+      load(deck, role) {{
+        const cue = deck.cue;
+        if (!cue) return;
+        const vid = cue.youtube_ids[deck.idIndex] || cue.youtube_ids[0];
+        
+        this.clearTimer(deck);
+        deck.status = 'loading';
+        deck.role = role;
+
+        const startSec = deck.playFull ? 0 : (cue.entry_sec || 0);
+        logToScreen(`Deck ${{deck.id}} cueing "${{cue.title}}" at ${{startSec}}s (${{role}}) [ID: ${{vid}}]`);
+
+        if (role === 'preload') {{
+          deck.player.mute();
+          deck.player.setVolume(0);
+          deck.volume = 0;
+        }} else {{
+          deck.player.unMute();
+          const targetVol = Math.round((100 * this.masterVolume) / 100);
+          deck.player.setVolume(targetVol);
+          deck.volume = 100;
+        }}
+
+        deck.player.loadVideoById({{
+          videoId: vid,
+          startSeconds: startSec
+        }});
+
+        // 6-second buffer safety timeout: If YouTube doesn't cue within 6s, auto-trigger nextSource!
+        deck.timer = setTimeout(() => {{
+          logToScreen(`⚠️ Deck ${{deck.id}} buffering timeout on "${{cue.title}}". Advancing to fallback...`);
+          this.nextSource(deck);
+        }}, 6000);
+
+        if (role === 'live') {{
+          deck.player.playVideo();
+          setTimeout(() => {{
+            try {{
+              if (deck.player.getPlayerState() !== 1) {{
+                document.getElementById('unmutePrompt').classList.remove('hidden');
+              }}
+            }} catch(e) {{}}
+          }}, 1200);
+        }}
+        this.updateUI();
+      }}
+
+      nextSource(deck) {{
+        this.clearTimer(deck);
+        const cue = deck.cue;
+        if (!cue) return;
+
+        deck.idIndex += 1;
+        if (deck.idIndex < cue.youtube_ids.length) {{
+          logToScreen(`Deck ${{deck.id}} trying alternate source ${{deck.idIndex + 1}}/${{cue.youtube_ids.length}} for "${{cue.title}}"...`);
+          this.load(deck, deck.role);
+          return;
+        }}
+
+        // ALL SOURCES FOR THIS TRACK FAILED: PURGE IT FROM QUEUE!
+        logToScreen(`⚠️ Dropping "${{cue.title}}" (no working stream). Advancing to next track in queue.`);
+        this.queue = this.queue.filter(s => s.song_id !== cue.song_id);
+        renderQueue(this.queue);
+
+        if (deck.role === 'live') {{
+          deck.status = 'empty';
+          deck.cue = null;
+          this.updateUI();
+          this.requestHandoff('error');
+        }} else {{
+          // Immediately preload the next song for Deck B!
+          this.preloadNextOn(deck);
+        }}
+      }}
+
+      preloadNextOn(deck) {{
+        if (this.queue.length === 0) {{
+          deck.status = 'empty';
+          deck.cue = null;
+          this.updateUI();
+          return;
+        }}
+        const nextCue = this.queue[0];
+        this.assign(deck, nextCue);
+        this.load(deck, 'preload');
+      }}
+
+      // Force skip if a deck is stuck buffering past hook cut
+      forceSkipStuckDeck(deck) {{
+        this.clearTimer(deck);
+        const stuck = deck.cue;
+        if (stuck) {{
+          logToScreen(`⚡ Auto-purging stuck track "${{stuck.title}}" from queue.`);
+          this.queue = this.queue.filter(s => s.song_id !== stuck.song_id);
+          renderQueue(this.queue);
+        }}
+
+        if (this.queue.length === 0) {{
+          logToScreen("No more songs in queue.");
+          return;
+        }}
+
+        const nextSong = this.queue[0];
+        this.assign(deck, nextSong);
+        this.load(deck, 'preload');
+        this.startIncoming(deck, 'recovery_auto_drop');
+      }}
+
+      onStateChange(deck, state) {{
+        if (state === 1) {{ // PLAYING
+          if (this.awaitingStart === deck.id) {{
+            this.startFade(deck);
+          }} else if (deck.status === 'loading' && deck.role === 'preload') {{
+            this.clearTimer(deck);
+            deck.player.pauseVideo();
+            deck.player.seekTo(deck.cue.entry_sec || 0, true);
+            deck.status = 'ready';
+            logToScreen(`✓ Deck ${{deck.id}} primed at hook (${{deck.cue.entry_sec}}s). Ready for mix!`);
+            this.updateUI();
+            
+            if (this.pendingHandoff) {{
+              const reason = this.pendingHandoff;
+              this.pendingHandoff = null;
+              this.requestHandoff(reason);
+            }}
+          }} else if (deck.status === 'loading' && deck.role === 'live') {{
+            this.clearTimer(deck);
+            deck.status = 'live';
+            document.getElementById('unmutePrompt').classList.add('hidden');
+            logToScreen(`Deck ${{deck.id}} is LIVE & PLAYING.`);
+            this.updateLiveTrackMetadata(deck.cue);
+            this.updateUI();
+          }}
+        }} else if (state === 5) {{ // CUED
+          if (deck.status === 'loading' && deck.role === 'preload') {{
+            this.clearTimer(deck);
+            deck.status = 'ready';
+            logToScreen(`✓ Deck ${{deck.id}} cued (state 5): "${{deck.cue.title}}" ready!`);
+            this.updateUI();
+            if (this.pendingHandoff) {{
+              const reason = this.pendingHandoff;
+              this.pendingHandoff = null;
+              this.requestHandoff(reason);
+            }}
+          }}
+        }} else if (state === 0) {{ // ENDED
+          if (deck.id === this.liveId && !this.crossfading) {{
+            this.requestHandoff('ended');
+          }}
+        }}
+      }}
+
+      onError(deck, err) {{
+        logToScreen(`Deck ${{deck.id}} YouTube error code ${{err}} on "${{deck.cue?.title}}"`);
+        if (this.awaitingStart === deck.id) {{
+          this.failIncoming(deck);
+        }} else if (deck.status === 'loading' || deck.status === 'ready') {{
+          this.nextSource(deck);
+        }} else if (deck.id === this.liveId && deck.status === 'live') {{
+          this.requestHandoff('error');
+        }}
+      }}
+
+      tick() {{
+        if (this.paused || this.crossfading || this.awaitingStart) return;
+        const live = this.decks[this.liveId];
+        if (!live || !live.player || live.status !== 'live') return;
+
+        let curTime = 0;
+        try {{ curTime = live.player.getCurrentTime() || 0; }} catch(e) {{ return; }}
+
+        const duration = live.cue.duration_sec || live.player.getDuration() || 180;
+        const cutAt = live.playFull ? (duration - 1.5) : (live.cue.exit_sec || duration - 1.5);
+
+        const pct = Math.min(100, Math.max(0, (curTime / cutAt) * 100));
+        document.getElementById('progressBar').style.width = `${{pct}}%`;
+        document.getElementById('currentTimeLabel').textContent = formatTime(curTime);
+        document.getElementById('cutPointLabel').textContent = live.playFull 
+          ? `Playing Full (${{formatTime(duration)}})` 
+          : `Hook Cut @ ${{formatTime(cutAt)}}`;
+
+        // Check if cut point reached!
+        if (curTime >= cutAt) {{
+          const otherId = this.liveId === 'A' ? 'B' : 'A';
+          const other = this.decks[otherId];
+
+          // SAFETY VALVE: If we are more than 4 seconds past hook cut and other deck is still stuck loading:
+          if (curTime >= cutAt + 4 && other.status === 'loading') {{
+            logToScreen(`⚠️ Live track is ${{ (curTime - cutAt).toFixed(1) }}s past cut point and Deck ${{other.id}} is stalled. Auto-skipping stuck track!`);
+            this.forceSkipStuckDeck(other);
+            return;
+          }}
+
+          this.requestHandoff('hook_cut');
+        }}
+      }}
+
+      requestHandoff(reason) {{
+        if (this.crossfading || this.awaitingStart) return;
+        const nextId = this.liveId === 'A' ? 'B' : 'A';
+        const nextDeck = this.decks[nextId];
+
+        if (nextDeck.status === 'ready') {{
+          this.startIncoming(nextDeck, reason);
+        }} else if (nextDeck.status === 'loading') {{
+          this.pendingHandoff = reason;
+          logToScreen(`Next track still buffering. Holding live Deck ${{this.liveId}}...`);
+        }} else if (nextDeck.status === 'empty') {{
+          logToScreen("End of party set reached.");
+        }}
+      }}
+
+      startIncoming(deck, reason) {{
+        this.pendingHandoff = reason;
+        this.awaitingStart = deck.id;
+        const player = deck.player;
+
+        player.setVolume(0);
+        player.unMute();
+        player.playVideo();
+
+        logToScreen(`Triggering incoming Deck ${{deck.id}} ("${{deck.cue.title}}"). Awaiting playback...`);
+
+        deck.timer = setTimeout(() => {{
+          logToScreen(`Deck ${{deck.id}} did not start in time (4s timeout). Failing incoming...`);
+          this.failIncoming(deck);
+        }}, 4000);
+      }}
+
+      failIncoming(deck) {{
+        this.clearTimer(deck);
+        this.awaitingStart = null;
+        try {{ deck.player.mute(); }} catch(e) {{}}
+        this.nextSource(deck);
+      }}
+
+      startFade(incoming) {{
+        this.clearTimer(incoming);
+        this.awaitingStart = null;
+        this.pendingHandoff = null;
+
+        const outgoing = this.decks[this.liveId];
+        incoming.status = 'live';
+        incoming.role = 'live';
+        this.liveId = incoming.id;
+        this.crossfading = true;
+
+        if (this.queue.length > 0 && this.queue[0].song_id === incoming.cue.song_id) {{
+          this.queue.shift();
+        }}
+
+        document.getElementById('crossfadeIndicator').classList.remove('hidden');
+        logToScreen(`⚡ Mixing into "${{incoming.cue.title}}" on Deck ${{incoming.id}} (${{this.crossfadeDuration / 1000}}s curve)`);
+
+        const start = performance.now();
+        const FADE_MS = this.crossfadeDuration || 1500;
+
+        if (this.fadeTimer) clearInterval(this.fadeTimer);
+        this.fadeTimer = setInterval(() => {{
+          const elapsed = performance.now() - start;
+          const s = Math.min(1, elapsed / FADE_MS);
+
+          const rawIn = Math.round(100 * Math.sin(s * Math.PI / 2));
+          const rawOut = Math.round(100 * Math.cos(s * Math.PI / 2));
+
+          incoming.volume = rawIn;
+          outgoing.volume = rawOut;
+
+          const inVol = Math.round((rawIn * this.masterVolume) / 100);
+          const outVol = Math.round((rawOut * this.masterVolume) / 100);
+
+          try {{
+            incoming.player.setVolume(inVol);
+            outgoing.player.setVolume(outVol);
+          }} catch(e) {{}}
+
+          this.updateUI();
+
+          if (s >= 1) {{
+            clearInterval(this.fadeTimer);
+            this.fadeTimer = null;
+            this.crossfading = false;
+            document.getElementById('crossfadeIndicator').classList.add('hidden');
+
+            try {{
+              outgoing.player.pauseVideo();
+              outgoing.player.mute();
+            }} catch(e) {{}}
+
+            outgoing.status = 'empty';
+            outgoing.cue = null;
+            this.updateLiveTrackMetadata(incoming.cue);
+            this.updateUI();
+
+            this.preloadNextOn(outgoing);
+            renderQueue(this.queue);
+          }}
+        }}, 40);
+      }}
+
+      skip() {{
+        logToScreen("Skip pressed.");
+        const nextId = this.liveId === 'A' ? 'B' : 'A';
+        const nextDeck = this.decks[nextId];
+
+        // If next deck is buffering or stuck, immediately drop it and advance!
+        if (nextDeck.status === 'loading') {{
+          logToScreen(`Next deck is currently buffering. Force-advancing to next song...`);
+          this.forceSkipStuckDeck(nextDeck);
+        }} else if (nextDeck.status === 'ready') {{
+          this.startIncoming(nextDeck, 'skip');
+        }} else {{
+          if (this.queue.length > 0) {{
+            this.forceSkipStuckDeck(nextDeck);
+          }}
+        }}
+      }}
+
+      playNow(song) {{
+        logToScreen(`⚡ Immediate Play Now: "${{song.title}}"`);
+        const nextId = this.liveId === 'A' ? 'B' : 'A';
+        const nextDeck = this.decks[nextId];
+
+        this.queue = this.queue.filter(s => s.song_id !== song.song_id);
+        this.queue.unshift(song);
+
+        this.assign(nextDeck, song);
+        this.load(nextDeck, 'preload');
+        this.startIncoming(nextDeck, 'user_play_now');
+        renderQueue(this.queue);
+      }}
+
+      queueNext(song) {{
+        this.queue = this.queue.filter(s => s.song_id !== song.song_id);
+        this.queue.unshift(song);
+        logToScreen(`Placed "${{song.title}}" next in queue!`);
+
+        const otherId = this.liveId === 'A' ? 'B' : 'A';
+        const otherDeck = this.decks[otherId];
+        this.assign(otherDeck, song);
+        this.load(otherDeck, 'preload');
+
+        renderQueue(this.queue);
+      }}
+
+      queueEnd(song) {{
+        this.queue = this.queue.filter(s => s.song_id !== song.song_id);
+        this.queue.push(song);
+        logToScreen(`Added "${{song.title}}" to the end of queue.`);
+        renderQueue(this.queue);
+      }}
+
+      moveItem(fromIdx, toIdx) {{
+        if (fromIdx < 0 || fromIdx >= this.queue.length || toIdx < 0 || toIdx >= this.queue.length) return;
+        const [moved] = this.queue.splice(fromIdx, 1);
+        this.queue.splice(toIdx, 0, moved);
+        logToScreen(`Moved "${{moved.title}}" to position ${{toIdx + 1}}.`);
+
+        if (fromIdx === 0 || toIdx === 0) {{
+          const otherId = this.liveId === 'A' ? 'B' : 'A';
+          const otherDeck = this.decks[otherId];
+          this.preloadNextOn(otherDeck);
+        }}
+        renderQueue(this.queue);
+      }}
+
+      shuffleQueue() {{
+        logToScreen("🔀 Shuffled entire upcoming queue!");
+        for (let i = this.queue.length - 1; i > 0; i--) {{
+          const j = Math.floor(Math.random() * (i + 1));
+          [this.queue[i], this.queue[j]] = [this.queue[j], this.queue[i]];
+        }}
+        const otherId = this.liveId === 'A' ? 'B' : 'A';
+        const otherDeck = this.decks[otherId];
+        this.preloadNextOn(otherDeck);
+        renderQueue(this.queue);
+      }}
+
+      removeItem(idx) {{
+        if (idx < 0 || idx >= this.queue.length) return;
+        const [removed] = this.queue.splice(idx, 1);
+        logToScreen(`Removed "${{removed.title}}" from queue.`);
+
+        if (idx === 0) {{
+          const otherId = this.liveId === 'A' ? 'B' : 'A';
+          const otherDeck = this.decks[otherId];
+          this.preloadNextOn(otherDeck);
+        }}
+        renderQueue(this.queue);
+      }}
+
+      togglePlay() {{
+        const live = this.decks[this.liveId];
+        if (!live || !live.player) return false;
+        if (this.paused) {{
+          live.player.playVideo();
+          this.paused = false;
+        }} else {{
+          live.player.pauseVideo();
+          this.paused = true;
+        }}
+        return this.paused;
+      }}
+
+      togglePlayFull() {{
+        const live = this.decks[this.liveId];
+        if (!live) return false;
+        live.playFull = !live.playFull;
+        logToScreen(live.playFull ? "Full song mode on." : "Hook cut mode on.");
+        return live.playFull;
+      }}
+
+      updateLiveTrackMetadata(cue) {{
+        if (!cue) return;
+        document.getElementById('nowPlayingTitle').textContent = cue.title;
+        document.getElementById('nowPlayingArtist').textContent = cue.artist;
+        renderQueue(this.queue);
+
+        if ('mediaSession' in navigator) {{
+          try {{
+            navigator.mediaSession.metadata = new MediaMetadata({{
+              title: cue.title,
+              artist: cue.artist,
+              album: 'NAUX Party Set',
+              artwork: [
+                {{ src: `https://img.youtube.com/vi/${{cue.youtube_ids[0]}}/hqdefault.jpg`, sizes: '480x360', type: 'image/jpeg' }}
+              ]
+            }});
+            navigator.mediaSession.playbackState = 'playing';
+          }} catch(e) {{}}
+        }}
+      }}
+
+      updateUI() {{
+        const dA = this.decks.A;
+        const dB = this.decks.B;
+
+        document.getElementById('deckAStatus').textContent = `${{dA.status.toUpperCase()}} (${{dA.volume}}%)`;
+        document.getElementById('deckAVolume').style.width = `${{dA.volume}}%`;
+        document.getElementById('deckAVolLabel').textContent = `${{dA.volume}}%`;
+        document.getElementById('deckASong').textContent = dA.cue ? dA.cue.title : 'Empty';
+        document.getElementById('deckAArtist').textContent = dA.cue ? dA.cue.artist : '-';
+
+        document.getElementById('deckBStatus').textContent = `${{dB.status.toUpperCase()}} (${{dB.volume}}%)`;
+        document.getElementById('deckBVolume').style.width = `${{dB.volume}}%`;
+        document.getElementById('deckBVolLabel').textContent = `${{dB.volume}}%`;
+        document.getElementById('deckBSong').textContent = dB.cue ? dB.cue.title : 'Empty';
+        document.getElementById('deckBArtist').textContent = dB.cue ? dB.cue.artist : '-';
+
+        const eqA = document.getElementById('deckAEq');
+        const eqB = document.getElementById('deckBEq');
+        if (this.liveId === 'A') {{
+          eqA.className = 'flex items-end gap-1 h-8 w-8 opacity-100';
+          eqB.className = 'flex items-end gap-1 h-8 w-8 opacity-30';
+        }} else {{
+          eqA.className = 'flex items-end gap-1 h-8 w-8 opacity-30';
+          eqB.className = 'flex items-end gap-1 h-8 w-8 opacity-100';
+        }}
+
+        document.getElementById('deckAMonitor').className = this.liveId === 'A'
+          ? 'p-5 rounded-3xl border-2 border-lime bg-white/[0.04] space-y-3 transition shadow-lg pulse-glow'
+          : 'p-5 rounded-3xl border border-white/10 bg-white/[0.02] space-y-3 transition opacity-60';
+
+        document.getElementById('deckBMonitor').className = this.liveId === 'B'
+          ? 'p-5 rounded-3xl border-2 border-lime bg-white/[0.04] space-y-3 transition shadow-lg pulse-glow'
+          : 'p-5 rounded-3xl border border-white/10 bg-white/[0.02] space-y-3 transition opacity-60';
+
+        document.getElementById('activeDeckPill').textContent = `Deck ${{this.liveId}} Live`;
+      }}
+    }}
+
+    const engine = new NauxDualDeckEngine();
+    engine.init();
+
+    // INTERACTIVE QUEUE RENDERER
+    let draggedIndex = null;
+
+    function renderQueue(list) {{
+      const queueListEl = document.getElementById('queueList');
+      queueListEl.innerHTML = '';
+
+      if (!list || list.length === 0) {{
+        queueListEl.innerHTML = '<li class="text-xs text-white/40 text-center py-6">Queue is empty. Search any artist above or click Shuffle!</li>';
+        return;
+      }}
+
+      list.forEach((s, idx) => {{
+        const li = document.createElement('li');
+        li.className = 'queue-item bg-white/[0.02] hover:bg-white/[0.05] border border-white/10 rounded-2xl p-3 flex items-center justify-between gap-3 transition cursor-grab active:cursor-grabbing';
+        li.draggable = true;
+        li.dataset.index = idx;
+
+        li.innerHTML = `
+          <div class="flex items-center gap-3 truncate">
+            <span class="text-white/40 hover:text-lime select-none text-base cursor-grab">⠿</span>
+            <div class="truncate">
+              <p class="font-bold text-white text-sm truncate">${{idx + 1}}. ${{s.title}}</p>
+              <p class="text-xs text-white/50 truncate">${{s.artist}} · <span class="text-lime font-mono">Hook @ ${{formatTime(s.entry_sec)}}</span></p>
+            </div>
+          </div>
+
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button class="play-now-btn bg-lime/10 hover:bg-lime text-lime hover:text-black font-anton px-2.5 py-1 rounded-lg text-xs uppercase transition" 
+                    title="Play Immediately">
+              ▶ Play
+            </button>
+            <button class="up-btn p-1.5 text-white/50 hover:text-white rounded-lg hover:bg-white/10 transition ${{idx === 0 ? 'opacity-20 cursor-not-allowed' : ''}}" 
+                    title="Move Up">
+              ▲
+            </button>
+            <button class="down-btn p-1.5 text-white/50 hover:text-white rounded-lg hover:bg-white/10 transition ${{idx === list.length - 1 ? 'opacity-20 cursor-not-allowed' : ''}}" 
+                    title="Move Down">
+              ▼
+            </button>
+            <button class="del-btn p-1.5 text-white/30 hover:text-red-400 rounded-lg hover:bg-white/10 transition" 
+                    title="Remove Song">
+              ✕
+            </button>
+          </div>
+        `;
+
+        li.querySelector('.play-now-btn').addEventListener('click', (e) => {{
+          e.stopPropagation();
+          engine.playNow(s);
+        }});
+
+        li.querySelector('.up-btn').addEventListener('click', (e) => {{
+          e.stopPropagation();
+          if (idx > 0) engine.moveItem(idx, idx - 1);
+        }});
+
+        li.querySelector('.down-btn').addEventListener('click', (e) => {{
+          e.stopPropagation();
+          if (idx < list.length - 1) engine.moveItem(idx, idx + 1);
+        }});
+
+        li.querySelector('.del-btn').addEventListener('click', (e) => {{
+          e.stopPropagation();
+          engine.removeItem(idx);
+        }});
+
+        li.addEventListener('dragstart', (e) => {{
+          draggedIndex = idx;
+          li.classList.add('dragging');
+          e.dataTransfer.effectAllowed = 'move';
+        }});
+
+        li.addEventListener('dragend', () => {{
+          li.classList.remove('dragging');
+          document.querySelectorAll('.queue-item').forEach(el => el.classList.remove('drag-over'));
+        }});
+
+        li.addEventListener('dragover', (e) => {{
+          e.preventDefault();
+          e.dataTransfer.dropEffect = 'move';
+          li.classList.add('drag-over');
+        }});
+
+        li.addEventListener('dragleave', () => {{
+          li.classList.remove('drag-over');
+        }});
+
+        li.addEventListener('drop', (e) => {{
+          e.preventDefault();
+          li.classList.remove('drag-over');
+          const targetIndex = Number(li.dataset.index);
+          if (draggedIndex !== null && draggedIndex !== targetIndex) {{
+            engine.moveItem(draggedIndex, targetIndex);
+          }}
+          draggedIndex = null;
+        }});
+
+        queueListEl.appendChild(li);
+      }});
+    }}
+
+    document.getElementById('shuffleQueueBtn').addEventListener('click', () => {{
+      engine.shuffleQueue();
+    }});
+
+    // Language buttons
+    document.querySelectorAll('.lang-btn').forEach(btn => {{
+      btn.addEventListener('click', () => {{
+        const lang = btn.dataset.lang;
+        if (lang === 'all') {{
+          selectedLangs = ['all'];
+          document.querySelectorAll('.lang-btn').forEach(b => {{
+            b.classList.remove('border-lime', 'bg-lime/10', 'text-lime');
+            b.classList.add('border-white/10', 'text-white/70');
+          }});
+          btn.classList.add('border-lime', 'bg-lime/10', 'text-lime');
+          btn.classList.remove('border-white/10', 'text-white/70');
+          return;
+        }}
+        if (selectedLangs.includes('all')) {{
+          selectedLangs = [];
+          document.querySelector('[data-lang="all"]').classList.remove('border-lime', 'bg-lime/10', 'text-lime');
+          document.querySelector('[data-lang="all"]').classList.add('border-white/10', 'text-white/70');
+        }}
+
+        if (selectedLangs.includes(lang)) {{
+          if (selectedLangs.length > 1) {{
+            selectedLangs = selectedLangs.filter(l => l !== lang);
+            btn.classList.remove('border-lime', 'bg-lime/10', 'text-lime');
+            btn.classList.add('border-white/10', 'text-white/70');
+          }}
+        }} else {{
+          selectedLangs.push(lang);
+          btn.classList.add('border-lime', 'bg-lime/10', 'text-lime');
+          btn.classList.remove('border-white/10', 'text-white/70');
+        }}
+      }});
+    }});
+
+    document.querySelectorAll('.time-btn').forEach(btn => {{
+      btn.addEventListener('click', () => {{
+        document.querySelectorAll('.time-btn').forEach(b => {{
+          b.classList.remove('border-lime', 'bg-lime/10', 'text-lime');
+          b.classList.add('border-white/10', 'text-white/70');
+        }});
+        btn.classList.add('border-lime', 'bg-lime/10', 'text-lime');
+        btn.classList.remove('border-white/10', 'text-white/70');
+        selectedTime = btn.dataset.time;
+      }});
+    }});
+
+    document.getElementById('startPartyBtn').addEventListener('click', async () => {{
+      document.getElementById('setupView').classList.add('hidden');
+      document.getElementById('playerView').classList.remove('hidden');
+
+      if ('wakeLock' in navigator) {{
+        try {{
+          await navigator.wakeLock.request('screen');
+          document.getElementById('wakeBadge').classList.remove('hidden');
+        }} catch(e) {{}}
+      }}
+
+      const setlist = buildSetlist(LIBRARY, selectedLangs, selectedTime);
+      engine.start(setlist);
+    }});
+
+    // SEARCH BAR
+    const searchInput = document.getElementById('quickSearchInput');
+    const resultsDropdown = document.getElementById('searchResultsDropdown');
+
+    searchInput.addEventListener('input', (e) => {{
+      const q = e.target.value.toLowerCase().trim();
+      if (!q || q.length < 2) {{
+        resultsDropdown.classList.add('hidden');
+        return;
+      }}
+
+      const matches = LIBRARY.filter(s => 
+        (s.title || '').toLowerCase().includes(q) || 
+        (s.artist || '').toLowerCase().includes(q)
+      ).slice(0, 10);
+
+      resultsDropdown.innerHTML = '';
+      if (matches.length === 0) {{
+        resultsDropdown.innerHTML = '<p class="text-xs text-white/40 p-2">No library match. You can paste any YouTube URL to play it!</p>';
+        resultsDropdown.classList.remove('hidden');
+        return;
+      }}
+
+      matches.forEach(m => {{
+        const row = document.createElement('div');
+        row.className = 'p-2.5 flex justify-between items-center hover:bg-white/10 rounded-xl transition';
+        row.innerHTML = `
+          <div class="truncate pr-2">
+            <p class="text-xs font-bold text-white truncate">${{m.title}}</p>
+            <p class="text-[10px] text-white/50 truncate">${{m.artist}} · <span class="uppercase text-lime font-mono">${{m.language}}</span></p>
+          </div>
+          <div class="flex items-center gap-1.5 shrink-0">
+            <button class="play-now-action bg-lime text-black font-anton px-2.5 py-1 rounded-lg text-xs uppercase hover:brightness-110 active:scale-95 transition">
+              ▶ Play Now
+            </button>
+            <button class="play-next-action bg-white/10 hover:bg-white/20 text-white font-anton px-2.5 py-1 rounded-lg text-xs uppercase transition">
+              ⏭ Next
+            </button>
+            <button class="queue-end-action bg-white/5 hover:bg-white/15 text-white/60 font-anton px-2 py-1 rounded-lg text-xs uppercase transition">
+              ➕ End
+            </button>
+          </div>
+        `;
+
+        row.querySelector('.play-now-action').addEventListener('click', () => {{
+          engine.playNow(m);
+          searchInput.value = '';
+          resultsDropdown.classList.add('hidden');
+        }});
+
+        row.querySelector('.play-next-action').addEventListener('click', () => {{
+          engine.queueNext(m);
+          searchInput.value = '';
+          resultsDropdown.classList.add('hidden');
+        }});
+
+        row.querySelector('.queue-end-action').addEventListener('click', () => {{
+          engine.queueEnd(m);
+          searchInput.value = '';
+          resultsDropdown.classList.add('hidden');
+        }});
+
+        resultsDropdown.appendChild(row);
+      }});
+
+      resultsDropdown.classList.remove('hidden');
+    }});
+
+    document.getElementById('addCustomYtBtn').addEventListener('click', () => {{
+      const raw = searchInput.value.trim();
+      if (!raw) return;
+
+      let vid = null;
+      const match = raw.match(/(?:youtu\\.be\\/|youtube\\.com\\/(?:embed\\/|v\\/|watch\\?v=|watch\\?.+&v=))([\\w-]{{11}})/);
+      if (match) vid = match[1];
+      else if (raw.length === 11) vid = raw;
+
+      if (!vid) {{
+        const first = LIBRARY.find(s => 
+          (s.title || '').toLowerCase().includes(raw.toLowerCase()) || 
+          (s.artist || '').toLowerCase().includes(raw.toLowerCase())
+        );
+        if (first) {{
+          engine.queueNext(first);
+          searchInput.value = '';
+          resultsDropdown.classList.add('hidden');
+          return;
+        }}
+        alert('Please paste a valid YouTube URL or video ID.');
+        return;
+      }}
+
+      const customTrack = {{
+        song_id: 'custom-' + vid,
+        title: 'Custom YouTube Track',
+        artist: 'Added by Aux Host',
+        youtube_ids: [vid],
+        entry_sec: 15,
+        exit_sec: 120,
+        duration_sec: 180,
+        energy: 9,
+        language: 'custom',
+        subtype: 'party',
+        banger: true
+      }};
+
+      engine.queueNext(customTrack);
+      searchInput.value = '';
+      resultsDropdown.classList.add('hidden');
+    }});
+
+    document.getElementById('masterVolumeSlider').addEventListener('input', (e) => {{
+      const vol = Number(e.target.value);
+      engine.masterVolume = vol;
+      document.getElementById('masterVolLabel').textContent = `${{vol}}%`;
+      const live = engine.decks[engine.liveId];
+      if (live && live.player && live.status === 'live') {{
+        try {{ live.player.setVolume(Math.round((live.volume * vol) / 100)); }} catch(err) {{}}
+      }}
+    }});
+
+    document.getElementById('fadeDurationSelect').addEventListener('change', (e) => {{
+      const ms = Number(e.target.value);
+      engine.crossfadeDuration = ms;
+      logToScreen(`Set crossfade duration to ${{ms / 1000}}s`);
+    }});
+
+    document.getElementById('exportSetlistBtn').addEventListener('click', () => {{
+      if (!engine.queue || engine.queue.length === 0) {{
+        alert("The queue is currently empty.");
+        return;
+      }}
+      const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(engine.queue, null, 2));
+      const downloadAnchor = document.createElement('a');
+      downloadAnchor.setAttribute("href", dataStr);
+      downloadAnchor.setAttribute("download", `party_set_${{Date.now()}}.json`);
+      document.body.appendChild(downloadAnchor);
+      downloadAnchor.click();
+      downloadAnchor.remove();
+      logToScreen("💾 Exported setlist to party_set.json!");
+    }});
+
+    document.getElementById('skipBtn').addEventListener('click', () => engine.skip());
+
+    document.getElementById('togglePlayBtn').addEventListener('click', () => {{
+      const paused = engine.togglePlay();
+      document.getElementById('togglePlayBtn').textContent = paused ? 'Resume' : 'Pause';
+    }});
+
+    document.getElementById('playFullBtn').addEventListener('click', () => {{
+      const isFull = engine.togglePlayFull();
+      document.getElementById('playFullBtn').className = isFull 
+        ? 'border border-lime text-lime px-4 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition bg-lime/10'
+        : 'border border-white/20 hover:border-white/50 text-white/70 px-4 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition';
+    }});
+
+    document.getElementById('unmuteBtn').addEventListener('click', () => {{
+      const live = engine.decks[engine.liveId];
+      if (live && live.player) {{
+        live.player.unMute();
+        live.player.setVolume(100);
+        live.player.playVideo();
+        document.getElementById('unmutePrompt').classList.add('hidden');
+        logToScreen("Audio unmuted by user tap.");
+      }}
+    }});
+
+    document.getElementById('retuneBtn').addEventListener('click', () => {{
+      document.getElementById('playerView').classList.add('hidden');
+      document.getElementById('setupView').classList.remove('hidden');
+    }});
+
+    // HARDWARE MEDIA KEYS
+    if ('mediaSession' in navigator) {{
+      try {{
+        navigator.mediaSession.setActionHandler('play', () => {{
+          engine.togglePlay();
+          document.getElementById('togglePlayBtn').textContent = 'Pause';
+          navigator.mediaSession.playbackState = 'playing';
+        }});
+        navigator.mediaSession.setActionHandler('pause', () => {{
+          engine.togglePlay();
+          document.getElementById('togglePlayBtn').textContent = 'Resume';
+          navigator.mediaSession.playbackState = 'paused';
+        }});
+        navigator.mediaSession.setActionHandler('nexttrack', () => {{
+          engine.skip();
+        }});
+      }} catch(e) {{}}
+    }}
+
+    // KEYBOARD SHORTCUTS
+    window.addEventListener('keydown', (e) => {{
+      const activeTag = document.activeElement ? document.activeElement.tagName : '';
+      if (activeTag === 'INPUT' || activeTag === 'TEXTAREA') {{
+        return;
+      }}
+
+      if (e.code === 'Space' || e.key === ' ' || e.key.toLowerCase() === 'k') {{
+        e.preventDefault();
+        const paused = engine.togglePlay();
+        document.getElementById('togglePlayBtn').textContent = paused ? 'Resume' : 'Pause';
+        if ('mediaSession' in navigator) {{
+          navigator.mediaSession.playbackState = paused ? 'paused' : 'playing';
+        }}
+      }} else if (e.code === 'ArrowRight' || e.key.toLowerCase() === 'n') {{
+        e.preventDefault();
+        engine.skip();
+      }} else if (e.key.toLowerCase() === 's') {{
+        engine.shuffleQueue();
+      }} else if (e.key.toLowerCase() === 'f') {{
+        const isFull = engine.togglePlayFull();
+        document.getElementById('playFullBtn').className = isFull 
+          ? 'border border-lime text-lime px-4 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition bg-lime/10'
+          : 'border border-white/20 hover:border-white/50 text-white/70 px-4 py-2.5 rounded-xl text-xs font-semibold uppercase tracking-wider transition';
+      }}
+    }});
+
+  </script>
+</body>
+</html>
+'''
+
+with open("naux_party_clone.html", "w", encoding="utf-8") as out:
+    out.write(html_content)
+
+shutil.copy("naux_party_clone.html", "index.html")
+print("Rebuilt naux_party_clone.html and index.html with bulletproof stall recovery and queue purge!")
+

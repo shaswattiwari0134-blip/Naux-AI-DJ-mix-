@@ -1,0 +1,17 @@
+{
+  "version": 2,
+  "routes": [
+    {
+      "src": "/room",
+      "dest": "/room.html"
+    },
+    {
+      "src": "/studio",
+      "dest": "/naux_cue_studio.html"
+    },
+    {
+      "src": "/(.*)",
+      "dest": "/$1"
+    }
+  ]
+}

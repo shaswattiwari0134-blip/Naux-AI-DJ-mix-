@@ -1,0 +1,12 @@
+[build]
+  publish = "."
+
+[[redirects]]
+  from = "/room"
+  to = "/room.html"
+  status = 200
+
+[[redirects]]
+  from = "/studio"
+  to = "/naux_cue_studio.html"
+  status = 200
